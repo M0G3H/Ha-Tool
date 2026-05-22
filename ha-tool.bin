@@ -1,0 +1,91 @@
+#!/bin/bash
+
+#set -ex
+
+##########This is Configuration File##############
+CONF_DIR=""             #example: /etc/wg
+FILE_EXTENTION=""       #example: .conf
+BASE_NAME_FORMAT=""     #example: for wg2.conf it's wg
+DOWN_COMMAND=""         #example: sudo wg-quick down 
+UP_COMMAND=""           #example: sudo wg-quick up
+VERSION="1.5.2"
+
+
+cd $CONF_DIR
+
+if [[ "$1" == "--version" ]]; then
+    echo "HA version $VERSION"
+    exit 0
+fi
+
+find_all_conf() {
+	all_conf=()
+	all_conf="$(ls $CONF_DIR | grep $BASE_NAME_FORMAT | grep $FILE_EXTENTION)"
+}
+
+find_available_conf() {
+	available_conf=()
+	for conf in $all_conf; do
+        	full_path="$CONF_DIR/$conf"
+        	ip=$(grep '^remote\.ip' "$full_path" | cut -d= -f2 | tr -d '[:space:]')
+        	[ -z "$ip" ] && continue
+        	if sudo ping -c1 -W2 "$ip" >/dev/null 2>&1; then
+			available_conf+=("$conf")
+        	fi
+    	done
+}
+
+find_preferred_conf() {
+	preferred_conf=()
+	local candidates=()
+	for f in $available_conf; do
+        	num=${f%.*}
+        	num=${num##*$BASE_NAME_FORMAT}
+        	if [[ $num =~ ^[0-9]+$ ]]; then
+            		candidates+=("$num:$f")
+        	fi
+    	done
+    	local sorted
+    	sorted=$(printf '%s\n' "${candidates[@]}" | sort -n | head -n1)
+	if [[ -n $sorted ]]; then
+        	preferred_conf=${sorted#*:}
+	else
+		preferred_conf=""
+	fi
+}
+
+load_saved_up_conf() {
+	if [[ -f UP_CONF_FILE ]]; then
+        	up_conf=$(<UP_CONF_FILE)
+	else
+        	touch $CONF_DIR/UP_CONF_FILE
+		up_conf=""
+        fi
+}
+
+
+make_up_conf() {
+	if [[ -z $preferred_conf ]]; then
+        	echo "does not find any valid hub"
+        	return 1
+	elif [[ $preferred_conf == $up_conf ]]; then
+		echo "nothing need to change"
+	else 
+		echo "making $up_conf down"
+		$DOWN_COMMAND $up_conf
+		printf '%s\n' "$preferred_conf" > UP_CONF_FILE
+		echo "making $preferred_conf up"
+		$UP_COMMAND $preferred_conf >/dev/null
+	fi
+}
+
+# MAIN---------------------------------------------------------------
+while true; do
+	sleep 1
+	find_all_conf
+	find_available_conf
+	find_preferred_conf
+	load_saved_up_conf
+	make_up_conf
+	sleep 5
+done

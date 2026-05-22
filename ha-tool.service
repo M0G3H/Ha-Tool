@@ -1,0 +1,13 @@
+[Unit]
+Description=HA Service
+After=sg.service
+
+[Service]
+WorkingDirectory=      #example /etc/wg
+ExecStart=sudo ha 
+#ExecStop=sudo
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
